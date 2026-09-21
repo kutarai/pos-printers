@@ -56,6 +56,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.unit.dp
 import kotlinx.coroutines.launch
 import zw.co.unipay.printers.BluetoothReceiptPrinter
+import zw.co.unipay.printers.BuiltInPrinter
 import zw.co.unipay.printers.PrintResult
 import zw.co.unipay.printers.PrinterSettings
 import zw.co.unipay.printers.PrinterTransport
@@ -116,6 +117,16 @@ fun PrinterSetupScreen(
     printer: ReceiptPrinter,
     specimen: (columns: Int) -> List<String>,
     title: String = "Printer Setup",
+    /**
+     * A printer built into the device itself, when there is one. Null — the default — is what
+     * every application had before, and keeps this screen about external printers only.
+     *
+     * Worth a parameter rather than a boolean: a device WITH a head needs its state said out
+     * loud ("Out of paper" is a different job from "No printer fitted"), and a screen that
+     * announced "this device has no printer" while a head sat in the operator's hand was simply
+     * wrong — it only ever knew about the two radios.
+     */
+    builtIn: BuiltInPrinter? = null,
     deviceNoun: String = "device",
     paperWidths: List<PaperWidthOption> = PaperWidthOption.ROLLS,
     recordedNoun: String = "Receipts",
@@ -223,6 +234,7 @@ fun PrinterSetupScreen(
                 name = settings.printerName(),
                 deviceNoun = deviceNoun,
                 recordedNoun = recordedNoun,
+                builtIn = builtIn,
             )
 
             Spacer(Modifier.height(12.dp))
@@ -443,7 +455,7 @@ fun PrinterSetupScreen(
             Spacer(Modifier.height(20.dp))
 
             Button(
-                enabled = settings.isConfigured() && !busy,
+                enabled = (settings.isConfigured() || builtIn?.ready == true) && !busy,
                 onClick = {
                     busy = true
                     message = null
@@ -451,7 +463,10 @@ fun PrinterSetupScreen(
                         // Rendered by the host and sent through the same router its receipts use,
                         // so what is proved here is the path a customer's receipt will take —
                         // including whether the paper is the width it was said to be.
-                        message = when (val result = printer.printLines(specimen(width))) {
+                        // No external printer chosen, but the device has a head: prove that one.
+                        message = if (!settings.isConfigured() && builtIn != null) {
+                            builtIn.printSpecimen()
+                        } else when (val result = printer.printLines(specimen(width))) {
                             is PrintResult.Printed -> "Specimen printed."
                             is PrintResult.Failed -> result.reason
                         }
@@ -492,19 +507,38 @@ private fun Hint(text: String) {
  * the tab being looked at would leave an operator unsure which printer the next receipt goes to.
  */
 @Composable
-private fun InUseCard(configured: Boolean, transport: PrinterTransport, name: String?, deviceNoun: String, recordedNoun: String) {
+private fun InUseCard(
+    configured: Boolean,
+    transport: PrinterTransport,
+    name: String?,
+    deviceNoun: String,
+    recordedNoun: String,
+    builtIn: BuiltInPrinter?,
+) {
     val over = when (transport) {
         PrinterTransport.BLUETOOTH -> "Bluetooth"
         PrinterTransport.WIFI_DIRECT -> "Wi-Fi Direct"
     }
     Card(modifier = Modifier.fillMaxWidth()) {
         Column(Modifier.padding(12.dp)) {
-            if (configured) {
-                Text("Receipts print over $over", fontWeight = FontWeight.Bold)
-                Hint(name ?: "the printer chosen below")
-            } else {
-                Text("This $deviceNoun has no printer", fontWeight = FontWeight.Bold)
-                Hint("$recordedNoun are recorded either way; nothing is printed until a printer is chosen.")
+            when {
+                // An external printer chosen deliberately is what receipts go to, even on a
+                // device with a head of its own: the operator picked it.
+                configured -> {
+                    Text("Receipts print over $over", fontWeight = FontWeight.Bold)
+                    Hint(name ?: "the printer chosen below")
+                }
+                builtIn != null -> {
+                    Text(builtIn.name, fontWeight = FontWeight.Bold)
+                    Hint(
+                        if (builtIn.ready) "$recordedNoun print here unless a printer is chosen below."
+                        else "${builtIn.status}. $recordedNoun are recorded either way."
+                    )
+                }
+                else -> {
+                    Text("This $deviceNoun has no printer", fontWeight = FontWeight.Bold)
+                    Hint("$recordedNoun are recorded either way; nothing is printed until a printer is chosen.")
+                }
             }
         }
     }
