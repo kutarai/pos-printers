@@ -24,7 +24,29 @@ data class ReceiptContent(
     val tendered: Double,
     val change: Double,
     val paymentMethod: String,
-    val footer: String = "Thank you for shopping with us"
+    val footer: String = "Thank you for shopping with us",
+    /** What the tax authority made of the sale, printed as it came; null where none is required. */
+    val fiscal: FiscalSection? = null
+)
+
+/**
+ * The fiscal part of a receipt, from the tax authority's system: lines to print as they are,
+ * the QR code that lets the customer check the receipt, and lines after it. When
+ * [replacesItems], the lines already list the items and totals in the authority's own format,
+ * so the till's own list is left out rather than printed twice.
+ */
+data class FiscalSection(
+    val lines: List<String>,
+    val qrCode: String?,
+    val linesAfterQr: List<String> = emptyList(),
+    val replacesItems: Boolean = false
+)
+
+/** What goes to the printer: lines, a QR code, then more lines. */
+data class ReceiptDocument(
+    val lines: List<String>,
+    val qrCode: String? = null,
+    val linesAfterQr: List<String> = emptyList()
 )
 
 /**
@@ -77,8 +99,30 @@ class ReceiptLayout(private val width: Int = 32) {
         return listOf(head, "  $shownQuantity x ${money(unitPrice)}")
     }
 
-    fun render(content: ReceiptContent): List<String> {
+    /** The receipt as text alone; a fiscal QR code is left out. */
+    fun render(content: ReceiptContent): List<String> = document(content).let { it.lines + it.linesAfterQr }
+
+    /**
+     * Breaks [text] into lines that fit, at spaces where it can. A fiscal line can be wider than
+     * the paper - TaxCore's text is 40 characters - and every character of it has to be printed.
+     */
+    fun wrap(text: String): List<String> {
+        if (text.length <= width) return listOf(text)
         val out = mutableListOf<String>()
+        var rest = text
+        while (rest.length > width) {
+            val space = rest.lastIndexOf(' ', width)
+            val cut = if (space > width / 2) space else width
+            out += rest.substring(0, cut).trimEnd()
+            rest = rest.substring(cut).trimStart()
+        }
+        if (rest.isNotEmpty()) out += rest
+        return out
+    }
+
+    fun document(content: ReceiptContent): ReceiptDocument {
+        val out = mutableListOf<String>()
+        val fiscal = content.fiscal
 
         out += centre(content.merchantName.take(width))
         out += centre(content.dateTime)
@@ -87,28 +131,41 @@ class ReceiptLayout(private val width: Int = 32) {
         out += "Till: ${content.terminalId}".take(width)
         out += rule()
 
-        for (line in content.lines) {
-            out += item(
-                line.name, line.quantity, line.unitPrice, line.lineTotal,
-                line.isWeighted, line.unitOfMeasure
-            )
-        }
+        if (fiscal?.replacesItems != true) {
+            for (line in content.lines) {
+                out += item(
+                    line.name, line.quantity, line.unitPrice, line.lineTotal,
+                    line.isWeighted, line.unitOfMeasure
+                )
+            }
 
-        out += rule()
-        out += spread("Subtotal", money(content.subtotal))
-        // Prices are VAT-inclusive everywhere in this system. A receipt reading as though VAT
-        // were added on top invites an argument at the counter that the shop will lose.
-        out += spread("VAT included", money(content.tax))
-        out += spread("TOTAL ${content.currency}", money(content.total))
-        out += rule()
+            out += rule()
+            out += spread("Subtotal", money(content.subtotal))
+            // Prices are VAT-inclusive everywhere in this system. A receipt reading as though VAT
+            // were added on top invites an argument at the counter that the shop will lose.
+            out += spread("VAT included", money(content.tax))
+            out += spread("TOTAL ${content.currency}", money(content.total))
+            out += rule()
+        }
 
         out += spread(tenderLabel(content.paymentMethod), money(content.tendered))
         if (content.change > 0.0) out += spread("Change", money(content.change))
 
-        out += ""
-        out += centre(content.footer)
+        if (fiscal == null) {
+            out += ""
+            out += centre(content.footer)
+            return ReceiptDocument(out)
+        }
 
-        return out
+        // The fiscal part last: the authority's text says where it ends, and nothing of the
+        // till's may be mistaken for part of it.
+        out += rule()
+        fiscal.lines.forEach { out += wrap(it) }
+        val after = mutableListOf<String>()
+        fiscal.linesAfterQr.forEach { after += wrap(it) }
+        after += ""
+        after += centre(content.footer)
+        return ReceiptDocument(out, fiscal.qrCode, after)
     }
 
     private fun tenderLabel(method: String): String = when (method.uppercase()) {

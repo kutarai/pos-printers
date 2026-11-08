@@ -7,6 +7,11 @@ remember which printer a device uses and how wide its paper is, the ESC/POS byte
 receipt layout, and the one Printer Setup screen every application shows. Nothing in here knows
 what is being printed: a host renders its own receipt to lines and hands them over.
 
+A receipt can also carry a QR code, drawn by the printer itself (ESC/POS `GS ( k`) between two
+runs of lines - `ReceiptDocument`, printed with `ReceiptPrinter.printDocument`. A fiscal receipt
+uses this: `ReceiptContent.fiscal` holds the tax authority's lines and QR code, which
+`ReceiptLayout.document` places after the sale, wrapping any line wider than the paper.
+
 Used by the Synergy POS till and the ProCity council handheld. It is a library rather than part of
 either because both stand next to the same printers, and two copies of a Bluetooth socket drift
 apart in exactly the places that stop a receipt coming out.

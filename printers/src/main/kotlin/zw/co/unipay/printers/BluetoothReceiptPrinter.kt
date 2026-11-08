@@ -79,7 +79,11 @@ class BluetoothReceiptPrinter(
         }
     }
 
-    override suspend fun printLines(lines: List<String>): PrintResult = withContext(Dispatchers.IO) {
+    override suspend fun printLines(lines: List<String>): PrintResult = send(EscPos.document(lines))
+
+    override suspend fun printDocument(document: ReceiptDocument): PrintResult = send(EscPos.document(document))
+
+    private suspend fun send(bytes: ByteArray): PrintResult = withContext(Dispatchers.IO) {
         val address = settings.printerAddress()
             ?: return@withContext PrintResult.Failed("No printer has been chosen yet.")
 
@@ -102,7 +106,7 @@ class BluetoothReceiptPrinter(
             try { adapter?.cancelDiscovery() } catch (_: SecurityException) {}
 
             socket.connect()
-            socket.outputStream.write(EscPos.document(lines))
+            socket.outputStream.write(bytes)
             socket.outputStream.flush()
 
             // The printer buffers; closing immediately can cut the job off mid-receipt.

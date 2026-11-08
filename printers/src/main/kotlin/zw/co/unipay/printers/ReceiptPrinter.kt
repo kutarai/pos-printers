@@ -18,6 +18,13 @@ sealed class PrintResult {
  */
 interface ReceiptPrinter {
     suspend fun printLines(lines: List<String>): PrintResult
+
+    /**
+     * Prints lines with a QR code among them, drawn by the printer. A printer that cannot draw
+     * one prints the lines alone; the Bluetooth and Wi-Fi Direct printers here draw it.
+     */
+    suspend fun printDocument(document: ReceiptDocument): PrintResult =
+        printLines(document.lines + document.linesAfterQr)
 }
 
 /**
@@ -37,5 +44,11 @@ class TillReceiptPrinter(
         when (settings.transport()) {
             PrinterTransport.BLUETOOTH -> bluetooth.printLines(lines)
             PrinterTransport.WIFI_DIRECT -> wifiDirect.printLines(lines)
+        }
+
+    override suspend fun printDocument(document: ReceiptDocument): PrintResult =
+        when (settings.transport()) {
+            PrinterTransport.BLUETOOTH -> bluetooth.printDocument(document)
+            PrinterTransport.WIFI_DIRECT -> wifiDirect.printDocument(document)
         }
 }

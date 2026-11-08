@@ -144,10 +144,14 @@ class WifiDirectReceiptPrinter(
         )
     }
 
-    override suspend fun printLines(lines: List<String>): PrintResult = withContext(Dispatchers.IO) {
+    override suspend fun printLines(lines: List<String>): PrintResult = print(EscPos.document(lines))
+
+    override suspend fun printDocument(document: ReceiptDocument): PrintResult = print(EscPos.document(document))
+
+    private suspend fun print(bytes: ByteArray): PrintResult = withContext(Dispatchers.IO) {
         when (val endpoint = endpoint()) {
             is Endpoint.Unreachable -> PrintResult.Failed(endpoint.reason)
-            is Endpoint.At -> send(endpoint.host, settings.wifiDirectPort(), lines)
+            is Endpoint.At -> send(endpoint.host, settings.wifiDirectPort(), bytes)
         }
     }
 
@@ -197,13 +201,13 @@ class WifiDirectReceiptPrinter(
         return Endpoint.At(host)
     }
 
-    private fun send(host: String, port: Int, lines: List<String>): PrintResult {
+    private fun send(host: String, port: Int, bytes: ByteArray): PrintResult {
         var socket: Socket? = null
         return try {
             socket = Socket()
             socket.connect(InetSocketAddress(host, port), SOCKET_TIMEOUT_MS)
             socket.getOutputStream().apply {
-                write(EscPos.document(lines))
+                write(bytes)
                 flush()
             }
 
