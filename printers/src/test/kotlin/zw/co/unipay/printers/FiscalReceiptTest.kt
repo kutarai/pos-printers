@@ -1,5 +1,10 @@
 package zw.co.unipay.printers
 
+import com.google.zxing.BinaryBitmap
+import com.google.zxing.DecodeHintType
+import com.google.zxing.RGBLuminanceSource
+import com.google.zxing.common.HybridBinarizer
+import com.google.zxing.qrcode.QRCodeReader
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
 import org.junit.Assert.assertNull
@@ -7,7 +12,7 @@ import org.junit.Assert.assertTrue
 import org.junit.Test
 
 /**
- * A fiscal receipt: the tax authority's lines printed whole, its QR code drawn by the printer
+ * A fiscal receipt: the tax authority's lines printed whole, its QR code printed as a picture
  * inside the fiscal part, and the till's own item list left out when the authority's text
  * already has one.
  */
@@ -61,25 +66,71 @@ class FiscalReceiptTest {
         assertEquals(line.replace(" ", ""), wrapped.joinToString("").replace(" ", ""))
     }
 
-    @Test
-    fun `the printer is told to draw the QR code with the payload inside it`() {
-        val payload = "https://sandbox.taxcore.online/v/?vl=A0RCNz"
-        val bytes = EscPos.document(ReceiptDocument(listOf("before"), payload, listOf("after")))
-        val text = String(bytes, Charsets.ISO_8859_1)
+    /** Every GS v 0 band in the job, joined into one picture with a paper margin round it. */
+    private fun printedQr(bytes: ByteArray): Pair<BinaryBitmap, Pair<Int, Int>> {
+        val rows = ArrayList<BooleanArray>()
+        var i = 0
+        var width = 0
+        while (i + 8 <= bytes.size) {
+            if (bytes[i] == 0x1D.toByte() && bytes[i + 1] == 'v'.code.toByte() && bytes[i + 2] == '0'.code.toByte()) {
+                val widthBytes = (bytes[i + 4].toInt() and 0xFF) or ((bytes[i + 5].toInt() and 0xFF) shl 8)
+                val height = (bytes[i + 6].toInt() and 0xFF) or ((bytes[i + 7].toInt() and 0xFF) shl 8)
+                width = widthBytes * 8
+                i += 8
+                repeat(height) {
+                    rows += BooleanArray(width) { x -> bytes[i + x / 8].toInt() and (0x80 shr (x % 8)) != 0 }
+                    i += widthBytes
+                }
+            } else i++
+        }
+        val margin = 40
+        val pixels = IntArray((width + 2 * margin) * (rows.size + 2 * margin)) { 0xFFFFFF }
+        rows.forEachIndexed { y, row ->
+            row.forEachIndexed { x, dark ->
+                if (dark) pixels[(y + margin) * (width + 2 * margin) + x + margin] = 0
+            }
+        }
+        val source = RGBLuminanceSource(width + 2 * margin, rows.size + 2 * margin, pixels)
+        return BinaryBitmap(HybridBinarizer(source)) to (width to rows.size)
+    }
 
-        assertTrue(text.indexOf("before") < text.indexOf(payload))
-        assertTrue(text.indexOf(payload) < text.indexOf("after"))
-        // GS ( k ... 1 P 0 <data>: store, with the length of data + 3.
-        val store = text.indexOf("\u001D(k") .let { text.indexOf("1P0", it) }
-        val length = payload.length + 3
-        assertEquals((length and 0xFF).toChar(), text[store - 2])
-        // GS ( k 3 0 1 Q 0: print.
-        assertTrue(text.contains("\u001D(k\u0003\u00001Q0"))
+    private fun decode(bitmap: BinaryBitmap): String =
+        QRCodeReader().decode(bitmap, mapOf(DecodeHintType.TRY_HARDER to true)).text
+
+    /** As long as the link the TaxCore sandbox really returned. */
+    private val taxCoreLink = "https://sandbox.taxcore.online/v/?vl=" +
+        (1..812).map { "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789%"[it * 7919 % 63] }.joinToString("")
+
+    @Test
+    fun `a full length TaxCore link prints as a code that reads back whole and uses the paper`() {
+        assertEquals(849, taxCoreLink.length)
+        val (bitmap, size) = printedQr(EscPos.document(ReceiptDocument(listOf("before"), taxCoreLink, listOf("after"))))
+        assertEquals(taxCoreLink, decode(bitmap))
+        assertEquals(384, size.first)
+        assertEquals(384, size.second)
     }
 
     @Test
-    fun `a longer QR payload gets smaller modules so the code still fits the paper`() {
-        assertTrue(EscPos.qrModuleSize(40) >= EscPos.qrModuleSize(400))
-        assertTrue(EscPos.qrModuleSize(1000) >= 3)
+    fun `on 80mm paper the same code is larger and still reads back`() {
+        val (bitmap, size) = printedQr(EscPos.document(ReceiptDocument(emptyList(), taxCoreLink), PrinterSettings.WIDE_ROLL))
+        assertEquals(taxCoreLink, decode(bitmap))
+        assertEquals(576, size.first)
+        assertEquals(576, size.second)
+    }
+
+    @Test
+    fun `a short link still meets the 42mm minimum and reads back`() {
+        val link = "https://fdmstest.zimra.co.zw/0000000321"
+        val (bitmap, size) = printedQr(EscPos.document(ReceiptDocument(emptyList(), link)))
+        assertEquals(link, decode(bitmap))
+        assertEquals(336, size.second)
+    }
+
+    @Test
+    fun `the code sits between the lines before and after it`() {
+        val text = String(EscPos.document(ReceiptDocument(listOf("before"), "https://x.test/1", listOf("after"))), Charsets.ISO_8859_1)
+        val code = text.indexOf("\u001Dv0")
+        assertTrue(text.indexOf("before") in 0 until code)
+        assertTrue(code < text.lastIndexOf("after"))
     }
 }

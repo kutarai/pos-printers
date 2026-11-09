@@ -41,5 +41,8 @@ dependencies {
 
     api("org.jetbrains.kotlinx:kotlinx-coroutines-android:1.8.0")
 
+    // Draws fiscal QR codes as pictures; plain Java, no Android parts.
+    implementation("com.google.zxing:core:3.5.3")
+
     testImplementation("junit:junit:4.13.2")
 }

@@ -1,5 +1,10 @@
 package zw.co.unipay.printers
 
+import com.google.zxing.WriterException
+import com.google.zxing.qrcode.decoder.ErrorCorrectionLevel
+import com.google.zxing.qrcode.encoder.ByteMatrix
+import com.google.zxing.qrcode.encoder.Encoder
+
 /**
  * Turns finished lines into the bytes an ESC/POS printer expects.
  *
@@ -16,13 +21,27 @@ object EscPos {
     /** How far the paper is fed before cutting, so the cut misses the last printed line. */
     private const val FEED_LINES = 3
 
+    private const val ESC_INT = 0x1B
+
+    /** The ERS requires a QR code of at least 42 mm square: 336 dots. */
+    private const val QR_MIN_DOTS = 336
+
+    /** How coarse a code may get on wide paper before it is only wasting receipt. */
+    private const val QR_DOTS_PER_MODULE = 6
+
+    /** Blank feed above and below the code, about 3 mm. */
+    private const val QR_QUIET_DOTS = 24
+
+    private const val RASTER_BAND_ROWS = 64
+
     fun document(lines: List<String>): ByteArray = document(ReceiptDocument(lines))
 
     /**
      * A receipt with, optionally, a QR code between two runs of lines - where a fiscal receipt
-     * needs it, inside the fiscal part rather than after it.
+     * needs it, inside the fiscal part rather than after it. [paperColumns] is the roll in use,
+     * as [PrinterSettings.paperWidth] gives it, and sets how wide the code can be.
      */
-    fun document(document: ReceiptDocument): ByteArray {
+    fun document(document: ReceiptDocument, paperColumns: Int = PrinterSettings.NARROW_ROLL): ByteArray {
         val out = ArrayList<Byte>(512)
 
         // ESC @ — reset. A printer left inverted or in double width by the previous job would
@@ -35,7 +54,7 @@ object EscPos {
             out += '\n'.code.toByte()
         }
 
-        document.qrCode?.takeIf { it.isNotEmpty() }?.let { qr(out, it) }
+        document.qrCode?.takeIf { it.isNotEmpty() }?.let { qr(out, it, printableDots(paperColumns)) }
 
         for (line in document.linesAfterQr) {
             out += ascii(line)
@@ -55,48 +74,62 @@ object EscPos {
         return out.toByteArray()
     }
 
+    /** Dots an 8 dot/mm head prints across: 48 mm on a 58 mm roll, 72 mm on an 80 mm roll. */
+    private fun printableDots(paperColumns: Int): Int =
+        if (paperColumns >= PrinterSettings.WIDE_ROLL) 576 else 384
+
     /**
-     * GS ( k — the printer draws the QR code itself, centred. Model 2, error correction M, and
-     * modules sized so the code comes out about 42 mm square on an 8 dot/mm head: TaxCore
-     * jurisdictions require at least that, and it scans easily anywhere.
+     * The QR code as a picture, centred on the full width of the head.
+     *
+     * Not left to the printer's own QR command (GS ( k): a TaxCore verification link runs to some
+     * 850 characters, which that command could only draw in squares three dots wide, too fine to
+     * scan once printed on thermal paper. Here error correction L keeps the code as small as it
+     * can be, and the picture then uses all the width there is. The paper beyond the head is the
+     * quiet zone at the sides; a short feed makes it above and below.
      */
-    private fun qr(out: ArrayList<Byte>, payload: String) {
-        val data = payload.toByteArray(Charsets.ISO_8859_1)
-        val esc = 0x1B
-        val gs = 0x1D
-        val k = 'k'.code
-        val paren = '('.code
-        // ESC a 1 — centre.
-        put(out, esc, 'a'.code, 1)
-        // Function 165: model 2.
-        put(out, gs, paren, k, 4, 0, 49, 65, 50, 0)
-        // Function 167: module size in dots.
-        put(out, gs, paren, k, 3, 0, 49, 67, qrModuleSize(data.size))
-        // Function 169: error correction level M.
-        put(out, gs, paren, k, 3, 0, 49, 69, 49)
-        // Function 180: store the data.
-        val length = data.size + 3
-        put(out, gs, paren, k, length and 0xFF, length shr 8, 49, 80, 48)
-        out += data.toList()
-        // Function 181: print it.
-        put(out, gs, paren, k, 3, 0, 49, 81, 48)
-        put(out, '\n'.code)
-        // ESC a 0 — back to the left.
-        put(out, esc, 'a'.code, 0)
+    private fun qr(out: ArrayList<Byte>, payload: String, printable: Int) {
+        val matrix = try {
+            Encoder.encode(payload, ErrorCorrectionLevel.L).matrix
+        } catch (e: WriterException) {
+            return  // Longer than any QR code holds. The receipt still has to come out.
+        }
+        put(out, ESC_INT, 'J'.code, QR_QUIET_DOTS)
+        raster(out, qrRows(matrix, printable), printable / 8)
+        put(out, ESC_INT, 'J'.code, QR_QUIET_DOTS)
+    }
+
+    /**
+     * The code's rows as packed bits, one byte array per dot row, each [printable] / 8 bytes wide.
+     * A module is a whole number of dots only when that happens to fit; otherwise modules differ
+     * by at most a dot, which readers follow from the timing pattern.
+     */
+    private fun qrRows(matrix: ByteMatrix, printable: Int): List<ByteArray> {
+        val modules = matrix.width
+        val side = minOf(printable, maxOf(QR_MIN_DOTS, modules * QR_DOTS_PER_MODULE))
+        val left = (printable - side) / 2
+        return (0 until side).map { y ->
+            val row = ByteArray(printable / 8)
+            val moduleY = y * modules / side
+            for (x in 0 until side) {
+                if (matrix.get(x * modules / side, moduleY).toInt() == 1) {
+                    val dot = left + x
+                    row[dot / 8] = (row[dot / 8].toInt() or (0x80 shr (dot % 8))).toByte()
+                }
+            }
+            row
+        }
+    }
+
+    /** GS v 0, in bands, because a whole code in one command overruns some printers' buffers. */
+    private fun raster(out: ArrayList<Byte>, rows: List<ByteArray>, widthBytes: Int) {
+        for (band in rows.chunked(RASTER_BAND_ROWS)) {
+            put(out, 0x1D, 'v'.code, '0'.code, 0, widthBytes and 0xFF, widthBytes shr 8, band.size and 0xFF, band.size shr 8)
+            band.forEach { out += it.toList() }
+        }
     }
 
     private fun put(out: ArrayList<Byte>, vararg values: Int) {
         for (v in values) out += v.toByte()
-    }
-
-    /** Bytes a QR version holds at error correction M, versions 1 to 20. */
-    private val QR_CAPACITY_M = intArrayOf(14, 26, 42, 62, 84, 106, 122, 152, 180, 213, 251, 287, 331, 362, 412, 450, 504, 560, 624, 666)
-
-    /** Dots per module for about 340 dots (42 mm) across, kept between 3 and 8. */
-    internal fun qrModuleSize(bytes: Int): Int {
-        val version = QR_CAPACITY_M.indexOfFirst { bytes <= it }.let { if (it < 0) 20 else it + 1 }
-        val modules = 17 + 4 * version + 8   // with its quiet zone
-        return (340 / modules).coerceIn(3, 8)
     }
 
     /**

@@ -146,7 +146,7 @@ class WifiDirectReceiptPrinter(
 
     override suspend fun printLines(lines: List<String>): PrintResult = print(EscPos.document(lines))
 
-    override suspend fun printDocument(document: ReceiptDocument): PrintResult = print(EscPos.document(document))
+    override suspend fun printDocument(document: ReceiptDocument): PrintResult = print(EscPos.document(document, settings.paperWidth()))
 
     private suspend fun print(bytes: ByteArray): PrintResult = withContext(Dispatchers.IO) {
         when (val endpoint = endpoint()) {

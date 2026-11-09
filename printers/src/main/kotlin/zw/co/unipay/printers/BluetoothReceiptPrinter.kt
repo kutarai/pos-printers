@@ -81,7 +81,7 @@ class BluetoothReceiptPrinter(
 
     override suspend fun printLines(lines: List<String>): PrintResult = send(EscPos.document(lines))
 
-    override suspend fun printDocument(document: ReceiptDocument): PrintResult = send(EscPos.document(document))
+    override suspend fun printDocument(document: ReceiptDocument): PrintResult = send(EscPos.document(document, settings.paperWidth()))
 
     private suspend fun send(bytes: ByteArray): PrintResult = withContext(Dispatchers.IO) {
         val address = settings.printerAddress()
