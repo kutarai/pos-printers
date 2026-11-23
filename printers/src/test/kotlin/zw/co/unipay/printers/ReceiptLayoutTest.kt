@@ -187,6 +187,43 @@ class ReceiptLayoutTest {
             wide.spread("Total", "12.50"))
     }
 
+    private fun cashSale(tendered: Double = 100.0, change: Double = 40.0) = ReceiptContent(
+        merchantName = "Synergy Retail",
+        receiptNumber = "REC-4", dateTime = "04 Aug 2026", terminalId = "POS-01",
+        lines = listOf(ReceiptLine("Chips (Regular)", 1.0, 1.50, 1.50)),
+        subtotal = 1.30, tax = 0.20, total = 1.50, currency = "USD",
+        tendered = tendered, change = change, paymentMethod = "CASH"
+    )
+
+    @Test
+    fun `foreignChangeIsLabelled`() {
+        val receipt = paper.render(cashSale().copy(changeCurrency = "ZWG"))
+
+        assertTrue(receipt.any { it.startsWith("Change (ZWG)") && it.endsWith("40.00") })
+    }
+
+    @Test
+    fun `foreignTenderIsLabelled`() {
+        val receipt = paper.render(cashSale().copy(tenderedCurrency = "ZWG"))
+
+        assertTrue(receipt.any { it.startsWith("Cash (ZWG)") && it.endsWith("100.00") })
+    }
+
+    @Test
+    fun `sameCurrencyChangeUnchanged`() {
+        val receipt = paper.render(cashSale().copy(changeCurrency = "USD", tenderedCurrency = "USD"))
+
+        assertTrue(receipt.any { it.startsWith("Change") && !it.contains("(") })
+        assertTrue(receipt.any { it.startsWith("Cash") && !it.contains("(") })
+    }
+
+    @Test
+    fun `noChangeLineWhenZero`() {
+        val receipt = paper.render(cashSale(change = 0.0).copy(changeCurrency = "ZWG"))
+
+        assertTrue(receipt.none { it.startsWith("Change") })
+    }
+
     private fun contentWith(cashier: String? = null) = ReceiptContent(
         merchantName = "Synergy Retail",
         receiptNumber = "REC-3", dateTime = "04 Aug 2026", terminalId = "POS-01",

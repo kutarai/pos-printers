@@ -25,6 +25,10 @@ data class ReceiptContent(
     val currency: String,
     val tendered: Double,
     val change: Double,
+    /** Currency the cash was handed over in; blank or the sale's own prints no currency. */
+    val tenderedCurrency: String = "",
+    /** Currency the change was given in; blank or the sale's own prints no currency. */
+    val changeCurrency: String = "",
     val paymentMethod: String,
     val footer: String = "Thank you for shopping with us",
     /** What the tax authority made of the sale, printed as it came; null where none is required. */
@@ -188,8 +192,16 @@ class ReceiptLayout(private val width: Int = 32) {
             out += rule()
         }
 
-        out += spread(tenderLabel(content.paymentMethod), money(content.tendered))
-        if (content.change > 0.0) out += spread("Change", money(content.change))
+        out += spread(
+            tenderLabel(content.paymentMethod) + foreign(content.tenderedCurrency, content.currency),
+            money(content.tendered)
+        )
+        if (content.change > 0.0) {
+            out += spread(
+                "Change" + foreign(content.changeCurrency, content.currency),
+                money(content.change)
+            )
+        }
 
         if (fiscal == null) {
             out += ""
@@ -207,6 +219,10 @@ class ReceiptLayout(private val width: Int = 32) {
         after += centre(content.footer)
         return ReceiptDocument(out, fiscal.qrCode, after)
     }
+
+    /** " (ZWG)" when [given] is a currency other than the sale's, otherwise nothing. */
+    private fun foreign(given: String, sale: String): String =
+        if (given.isNotBlank() && given != sale) " ($given)" else ""
 
     private fun tenderLabel(method: String): String = when (method.uppercase()) {
         "CASH" -> "Cash"
