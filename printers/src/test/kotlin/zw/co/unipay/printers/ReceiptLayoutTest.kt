@@ -58,19 +58,17 @@ class ReceiptLayoutTest {
     // ── The lines of a sale ────────────────────────────────────────────
 
     @Test
-    fun `an item shows what was bought and what it came to`() {
-        val lines = paper.item(name = "Beef Burger", quantity = 2.0, unitPrice = 3.50, lineTotal = 7.00)
+    fun `an item is the description, then quantity and price left and the amount right`() {
+        val lines = paper.item(name = "Beef Burger", quantity = 2.0, unitPrice = 3.5, lineTotal = 7.0)
 
-        assertEquals("Beef Burger" + " ".repeat(32 - "Beef Burger".length - 4) + "7.00", lines.first())
-        assertEquals("  2 x 3.50", lines[1])
+        assertEquals(listOf("Beef Burger", "2 x 3.50" + " ".repeat(32 - 8 - 4) + "7.00"), lines)
     }
 
     @Test
-    fun `a single unit needs no multiplication spelled out`() {
-        val lines = paper.item(name = "Chips (Regular)", quantity = 1.0, unitPrice = 1.50, lineTotal = 1.50)
+    fun `a single unit is laid out the same way`() {
+        val lines = paper.item(name = "Chips (Regular)", quantity = 1.0, unitPrice = 1.5, lineTotal = 1.5)
 
-        assertEquals(1, lines.size)
-        assertEquals("Chips (Regular)" + " ".repeat(32 - "Chips (Regular)".length - 4) + "1.50", lines.first())
+        assertEquals(listOf("Chips (Regular)", "1 x 1.50" + " ".repeat(32 - 8 - 4) + "1.50"), lines)
     }
 
     @Test
@@ -82,15 +80,16 @@ class ReceiptLayoutTest {
             isWeighted = true, unitOfMeasure = "kg"
         )
 
-        assertEquals("Beef Mince" + " ".repeat(32 - "Beef Mince".length - 4) + "4.91", lines.first())
-        assertEquals("  0.756 kg x 6.50", lines[1])
+        assertEquals("Beef Mince", lines.first())
+        assertEquals("0.756 kg x 6.50" + " ".repeat(32 - 15 - 4) + "4.91", lines[1])
     }
 
     @Test
-    fun `quantities do not carry meaningless decimals`() {
-        val lines = paper.item(name = "Cola", quantity = 3.0, unitPrice = 1.20, lineTotal = 3.60)
+    fun `a description wider than the paper wraps rather than pushing the amount off`() {
+        val lines = paper.item(name = "Amoxicillin 500mg capsules pack of 21", quantity = 1.0, unitPrice = 33.6, lineTotal = 33.6)
 
-        assertEquals("  3 x 1.20", lines[1])
+        assertTrue(lines.all { it.length <= 32 })
+        assertTrue(lines.last().endsWith("33.60"))
     }
 
     // ── What the printer is handed ─────────────────────────────────────

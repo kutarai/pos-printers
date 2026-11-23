@@ -80,9 +80,10 @@ class ReceiptLayout(private val width: Int = 32) {
     fun rule(): String = "-".repeat(width)
 
     /**
-     * An item: what it was and what it came to, with the working shown underneath when there is
-     * any. A single unit at its own price needs no arithmetic spelled out; a weight does, because
-     * the customer is checking the scale.
+     * An item, on two lines: what it was, then the quantity and unit price on the left and what
+     * the line came to on the right, every amount to two decimals. The same shape whatever the
+     * quantity, so the eye runs down one column of amounts; a weight keeps its unit, because the
+     * customer is checking the scale.
      */
     fun item(
         name: String,
@@ -92,11 +93,47 @@ class ReceiptLayout(private val width: Int = 32) {
         isWeighted: Boolean = false,
         unitOfMeasure: String = "Each"
     ): List<String> {
-        val head = spread(name, money(lineTotal))
-        if (!isWeighted && quantity == 1.0) return listOf(head)
-
         val shownQuantity = if (isWeighted) "${trimZeros(quantity)} $unitOfMeasure" else trimZeros(quantity)
-        return listOf(head, "  $shownQuantity x ${money(unitPrice)}")
+        return wrap(name) + spread("$shownQuantity x ${money(unitPrice)}", money(lineTotal))
+    }
+
+    /**
+     * A line of the tax authority's text, laid out for this paper. TaxCore's journal is 40
+     * characters wide, and on a 32-column roll split at the paper's edge its rules and banners
+     * broke in two and every "label   value" pair landed on separate lines. Only the spacing and
+     * the padding of rules change here; every word and figure is printed:
+     *
+     *  - a rule (one character repeated) becomes a rule of the paper's width;
+     *  - a banner (text padded with rule characters) is re-centred in the same padding;
+     *  - an item's working ("  2.0 x 4.6    9.20") becomes the till's own item line, amounts to
+     *    two decimals;
+     *  - a label and a value set apart by two or more spaces are spread across the paper;
+     *  - anything else that is too wide is wrapped at a space ([wrap]).
+     */
+    fun fit(text: String): List<String> {
+        RULE.matchEntire(text)?.let { return listOf(it.groupValues[1].repeat(width)) }
+        BANNER.matchEntire(text)?.let { m ->
+            val pad = m.groupValues[1].first()
+            val title = " ${m.groupValues[2]} "
+            if (title.length >= width) return wrap(m.groupValues[2])
+            val left = (width - title.length) / 2
+            return listOf(pad.toString().repeat(left) + title + pad.toString().repeat(width - left - title.length))
+        }
+        WORKING.matchEntire(text)?.let { m ->
+            val quantity = m.groupValues[1].toDoubleOrNull()
+            val price = m.groupValues[2].toDoubleOrNull()
+            val total = m.groupValues[3].replace(",", "").toDoubleOrNull()
+            if (quantity != null && price != null && total != null) {
+                return listOf(spread("${trimZeros(quantity)} x ${money(price)}", money(total)))
+            }
+        }
+        if (text.length <= width) return listOf(text)
+        PAIR.matchEntire(text)?.let { m ->
+            val label = m.groupValues[1]
+            val value = m.groupValues[2]
+            if (label.length + 1 + value.length <= width) return listOf(spread(label, value))
+        }
+        return wrap(text)
     }
 
     /** The receipt as text alone; a fiscal QR code is left out. */
@@ -160,9 +197,9 @@ class ReceiptLayout(private val width: Int = 32) {
         // The fiscal part last: the authority's text says where it ends, and nothing of the
         // till's may be mistaken for part of it.
         out += rule()
-        fiscal.lines.forEach { out += wrap(it) }
+        fiscal.lines.forEach { out += fit(it) }
         val after = mutableListOf<String>()
-        fiscal.linesAfterQr.forEach { after += wrap(it) }
+        fiscal.linesAfterQr.forEach { after += fit(it) }
         after += ""
         after += centre(content.footer)
         return ReceiptDocument(out, fiscal.qrCode, after)
@@ -176,7 +213,21 @@ class ReceiptLayout(private val width: Int = 32) {
         else -> method.lowercase().replaceFirstChar { it.uppercase() }
     }
 
-    private fun money(value: Double): String = String.format("%.2f", value)
+    private fun money(value: Double): String = String.format(java.util.Locale.ROOT, "%.2f", value)
+
+    private companion object {
+        /** One rule character, repeated: "====", "----". */
+        val RULE = Regex("""^\s*([=\-*_#~])\1{3,}\s*$""")
+
+        /** Text between runs of one rule character: "===== TITLE =====". */
+        val BANNER = Regex("""^\s*([=\-*_#~])\1{2,}\s*(\S.*?\S|\S)\s*\1{3,}\s*$""")
+
+        /** An item's working: quantity x price, then the line's amount. */
+        val WORKING = Regex("""^\s*(\d+(?:\.\d+)?)\s*[xX×]\s*(\d+(?:\.\d+)?)\s{2,}(-?[\d,]+(?:\.\d+)?)\s*$""")
+
+        /** A label and a value, set apart by two or more spaces. */
+        val PAIR = Regex("""^\s*(\S.*?)\s{2,}(\S.*?)\s*$""")
+    }
 
     /** 3.0 reads as "3"; 0.756 keeps every digit that was weighed. */
     private fun trimZeros(value: Double): String =

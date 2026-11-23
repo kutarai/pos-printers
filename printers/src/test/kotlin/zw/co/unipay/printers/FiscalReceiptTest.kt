@@ -133,4 +133,47 @@ class FiscalReceiptTest {
         assertTrue(text.indexOf("before") in 0 until code)
         assertTrue(code < text.lastIndexOf("after"))
     }
+
+    /** The fake SDC's TaxCore journal, 40 columns wide, as a Z108 received it (2026-11-08). */
+    private val journal = listOf(
+        "===== TEST - NOT A FISCAL INVOICE ======",
+        "Cashier: 0520842010378191",
+        "------------- NORMAL-SALE --------------",
+        "Name                               Total",
+        "Half Chicken & Chips (A)",
+        "  1.0 x 6.5                         6.50",
+        "----------------------------------------",
+        "Total:                             52.80",
+        "========================================",
+        "SDC Time:            08/11/2026 21:37:49",
+        "Invoice Counter:         165077/165077NS",
+        "TEST SDC - THIS IS NOT A FISCAL INVOICE",
+    )
+
+    @Test
+    fun `a 40-column journal is laid out for 32 columns, one line for one`() {
+        val paper = ReceiptLayout(32)
+        val fitted = journal.flatMap { paper.fit(it) }
+
+        assertTrue(fitted.all { it.length <= 32 })
+        assertEquals("= TEST - NOT A FISCAL INVOICE ==", paper.fit(journal[0]).single())
+        assertEquals("-".repeat(9) + " NORMAL-SALE " + "-".repeat(10), paper.fit(journal[2]).single())
+        assertEquals("Name" + " ".repeat(23) + "Total", paper.fit(journal[3]).single())
+        assertEquals("1 x 6.50" + " ".repeat(20) + "6.50", paper.fit(journal[5]).single())
+        assertEquals("-".repeat(32), paper.fit(journal[6]).single())
+        assertEquals("=".repeat(32), paper.fit(journal[8]).single())
+        assertEquals("SDC Time:" + " ".repeat(4) + "08/11/2026 21:37:49", paper.fit(journal[9]).single())
+        assertEquals("Invoice Counter: 165077/165077NS", paper.fit(journal[10]).single())
+        // Only the long sentence needs two lines, and it keeps every word.
+        assertEquals(journal.size + 1, fitted.size)
+    }
+
+    @Test
+    fun `nothing of the authority's text is lost in fitting it`() {
+        val paper = ReceiptLayout(32)
+        fun words(lines: List<String>) = lines.flatMap { it.split(Regex("[\\s=\\-]+")) }
+            .filter { it.isNotBlank() && it != "x" }
+            .map { it.toDoubleOrNull()?.let { n -> String.format(java.util.Locale.ROOT, "%.2f", n) } ?: it }
+        assertEquals(words(journal), words(journal.flatMap { paper.fit(it) }))
+    }
 }
