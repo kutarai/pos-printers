@@ -16,6 +16,8 @@ data class ReceiptContent(
     val receiptNumber: String,
     val dateTime: String,
     val terminalId: String,
+    /** The cashier's full name; blank prints no cashier line. */
+    val cashier: String = "",
     val lines: List<ReceiptLine>,
     val subtotal: Double,
     val tax: Double,
@@ -166,6 +168,7 @@ class ReceiptLayout(private val width: Int = 32) {
         out += rule()
         out += "Receipt: ${content.receiptNumber}".take(width)
         out += "Till: ${content.terminalId}".take(width)
+        if (content.cashier.isNotBlank()) out += "Cashier: ${content.cashier}".take(width)
         out += rule()
 
         if (fiscal?.replacesItems != true) {

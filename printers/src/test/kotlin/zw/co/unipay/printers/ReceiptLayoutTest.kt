@@ -186,4 +186,35 @@ class ReceiptLayoutTest {
         assertEquals("Total" + " ".repeat(48 - "Total".length - "12.50".length) + "12.50",
             wide.spread("Total", "12.50"))
     }
+
+    private fun contentWith(cashier: String? = null) = ReceiptContent(
+        merchantName = "Synergy Retail",
+        receiptNumber = "REC-3", dateTime = "04 Aug 2026", terminalId = "POS-01",
+        lines = listOf(ReceiptLine("Chips (Regular)", 1.0, 1.50, 1.50)),
+        subtotal = 1.30, tax = 0.20, total = 1.50, currency = "USD",
+        tendered = 1.50, change = 0.0, paymentMethod = "CASH"
+    ).let { if (cashier == null) it else it.copy(cashier = cashier) }
+
+    @Test
+    fun `cashierLinePrintsAfterTill`() {
+        val receipt = paper.render(contentWith(cashier = "Tendai Moyo"))
+
+        val till = receipt.indexOf("Till: POS-01")
+        assertTrue("the till line is there", till >= 0)
+        assertEquals("Cashier: Tendai Moyo", receipt[till + 1])
+    }
+
+    @Test
+    fun `noCashierNoLine`() {
+        val receipt = paper.render(contentWith())
+
+        assertTrue(receipt.none { it.startsWith("Cashier:") })
+    }
+
+    @Test
+    fun `a long cashier name is cut to the paper`() {
+        val receipt = paper.render(contentWith(cashier = "Tendai Moyo-Chikwanha the Third of Harare"))
+
+        assertTrue(receipt.all { it.length <= 32 })
+    }
 }
