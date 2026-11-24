@@ -254,4 +254,102 @@ class ReceiptLayoutTest {
 
         assertTrue(receipt.all { it.length <= 32 })
     }
+
+    // ── Orders, line notes, claims ─────────────────────────────────────
+
+    @Test
+    fun plainReceiptUnchanged() {
+        val receipt = paper.document(contentWith(cashier = "Tendai Moyo")).lines
+
+        assertEquals(
+            listOf(
+                "         Synergy Retail",
+                "          04 Aug 2026",
+                "--------------------------------",
+                "Receipt: REC-3",
+                "Till: POS-01",
+                "Cashier: Tendai Moyo",
+                "--------------------------------",
+                "Chips (Regular)",
+                "1 x 1.50                    1.50",
+                "--------------------------------",
+                "Subtotal                    1.30",
+                "VAT included                0.20",
+                "TOTAL USD                   1.50",
+                "--------------------------------",
+                "Cash                        1.50",
+                "",
+                " Thank you for shopping with us"
+            ),
+            receipt
+        )
+    }
+
+    // The sample label is 27 characters: with "-7.00" it cannot fit 32 columns, where spread
+    // would cut it, so the claim lines are read off a wider roll.
+    private val wide = ReceiptLayout(width = 48)
+
+    private val claim = ReceiptClaim("Medical aid (CIMAS · CLM-1)", 7.0)
+
+    private fun claimed() = contentWith().copy(
+        total = 10.0, claims = listOf(claim), amountDue = 3.0
+    )
+
+    @Test
+    fun orderLinesPrintUnderCashier() {
+        val receipt = paper.render(
+            contentWith(cashier = "Tendai Moyo").copy(orderLines = listOf("Table 12"))
+        )
+
+        val cashier = receipt.indexOfFirst { it.startsWith("Cashier:") }
+        assertEquals("Table 12", receipt[cashier + 1])
+    }
+
+    @Test
+    fun lineNotesPrintBeneathTheLine() {
+        val base = contentWith()
+        val receipt = paper.render(
+            base.copy(lines = listOf(ReceiptLine("Steak", 1.0, 5.0, 5.0, notes = "rare")))
+        )
+
+        val price = receipt.indexOfFirst { it.startsWith("1 x 5.00") }
+        assertTrue("the price line is there", price >= 0)
+        assertEquals("  rare", receipt[price + 1])
+    }
+
+    @Test
+    fun claimAndToPayAfterTotal() {
+        val receipt = wide.render(claimed())
+
+        val total = receipt.indexOfFirst { it.startsWith("TOTAL") }
+        val claimAt = receipt.indexOfFirst { it.startsWith("Medical aid (CIMAS · CLM-1)") }
+        assertTrue(claimAt > total)
+        assertTrue(receipt[claimAt].endsWith("-7.00"))
+        assertTrue(receipt[claimAt + 1].startsWith("TO PAY"))
+        assertTrue(receipt[claimAt + 1].endsWith("3.00"))
+    }
+
+    @Test
+    fun toPayNamesForeignCurrency() {
+        val receipt = wide.render(claimed().copy(amountDueCurrency = "ZWG"))
+
+        assertTrue(receipt.any { it.startsWith("TO PAY (ZWG)") })
+    }
+
+    @Test
+    fun claimsPrintWhenFiscalReplacesItems() {
+        val fiscal = FiscalSection(lines = listOf("X"), qrCode = null, replacesItems = true)
+        val receipt = wide.render(claimed().copy(fiscal = fiscal))
+
+        assertTrue(receipt.any { it.startsWith("Medical aid (CIMAS · CLM-1)") })
+        assertTrue(receipt.any { it.startsWith("TO PAY") })
+    }
+
+    @Test
+    fun noTenderLineWhenNothingTendered() {
+        val receipt = paper.render(claimed().copy(paymentMethod = "", tendered = 0.0))
+
+        assertTrue(receipt.any { it.startsWith("Medical aid") })
+        assertTrue(receipt.none { it.startsWith("Cash") })
+    }
 }

@@ -7,8 +7,13 @@ data class ReceiptLine(
     val unitPrice: Double,
     val lineTotal: Double,
     val isWeighted: Boolean = false,
-    val unitOfMeasure: String = "Each"
+    val unitOfMeasure: String = "Each",
+    /** Free text for the line, such as "rare"; printed beneath it, indented. */
+    val notes: String = ""
 )
+
+/** A share of the bill paid by someone else, such as a medical aid. */
+data class ReceiptClaim(val label: String, val amount: Double)
 
 /** Everything a receipt says, gathered before anything is formatted. */
 data class ReceiptContent(
@@ -32,7 +37,15 @@ data class ReceiptContent(
     val paymentMethod: String,
     val footer: String = "Thank you for shopping with us",
     /** What the tax authority made of the sale, printed as it came; null where none is required. */
-    val fiscal: FiscalSection? = null
+    val fiscal: FiscalSection? = null,
+    /** Lines naming the order the sale came from (table, patient); printed after the cashier. */
+    val orderLines: List<String> = emptyList(),
+    /** Shares of the bill paid by others; each prints as a deduction before the tender. */
+    val claims: List<ReceiptClaim> = emptyList(),
+    /** What the customer still owes; printed as TO PAY only when [claims] is not empty. */
+    val amountDue: Double? = null,
+    /** Currency [amountDue] is in; named in the label when it differs from [currency]. */
+    val amountDueCurrency: String = ""
 )
 
 /**
@@ -173,6 +186,7 @@ class ReceiptLayout(private val width: Int = 32) {
         out += "Receipt: ${content.receiptNumber}".take(width)
         out += "Till: ${content.terminalId}".take(width)
         if (content.cashier.isNotBlank()) out += "Cashier: ${content.cashier}".take(width)
+        content.orderLines.forEach { out += fit(it) }
         out += rule()
 
         if (fiscal?.replacesItems != true) {
@@ -181,6 +195,10 @@ class ReceiptLayout(private val width: Int = 32) {
                     line.name, line.quantity, line.unitPrice, line.lineTotal,
                     line.isWeighted, line.unitOfMeasure
                 )
+                if (line.notes.isNotBlank()) {
+                    ReceiptLayout(width - NOTE_INDENT.length).wrap(line.notes.trim())
+                        .forEach { out += NOTE_INDENT + it }
+                }
             }
 
             out += rule()
@@ -192,10 +210,21 @@ class ReceiptLayout(private val width: Int = 32) {
             out += rule()
         }
 
-        out += spread(
-            tenderLabel(content.paymentMethod) + foreign(content.tenderedCurrency, content.currency),
-            money(content.tendered)
-        )
+        if (content.claims.isNotEmpty()) {
+            content.claims.forEach { out += spread(it.label, "-" + money(it.amount)) }
+            content.amountDue?.let {
+                val label = "TO PAY" + foreign(content.amountDueCurrency, content.currency)
+                out += spread(label, money(it))
+            }
+        }
+
+        // Nothing tendered and no method: the medical aid covered the whole bill.
+        if (content.paymentMethod.isNotBlank() || content.tendered != 0.0) {
+            out += spread(
+                tenderLabel(content.paymentMethod) + foreign(content.tenderedCurrency, content.currency),
+                money(content.tendered)
+            )
+        }
         if (content.change > 0.0) {
             out += spread(
                 "Change" + foreign(content.changeCurrency, content.currency),
@@ -235,6 +264,8 @@ class ReceiptLayout(private val width: Int = 32) {
     private fun money(value: Double): String = String.format(java.util.Locale.ROOT, "%.2f", value)
 
     private companion object {
+        const val NOTE_INDENT = "  "
+
         /** One rule character, repeated: "====", "----". */
         val RULE = Regex("""^\s*([=\-*_#~])\1{3,}\s*$""")
 
