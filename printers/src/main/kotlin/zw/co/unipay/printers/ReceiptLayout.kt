@@ -211,10 +211,10 @@ class ReceiptLayout(private val width: Int = 32) {
         }
 
         if (content.claims.isNotEmpty()) {
-            content.claims.forEach { out += spread(it.label, "-" + money(it.amount)) }
+            content.claims.forEach { out += labelled(it.label, "-" + money(it.amount)) }
             content.amountDue?.let {
                 val label = "TO PAY" + foreign(content.amountDueCurrency, content.currency)
-                out += spread(label, money(it))
+                out += labelled(label, money(it))
             }
         }
 
@@ -248,6 +248,14 @@ class ReceiptLayout(private val width: Int = 32) {
         after += centre(content.footer)
         return ReceiptDocument(out, fiscal.qrCode, after)
     }
+
+    /**
+     * A label and an amount on one line when they fit; otherwise the label wrapped above and the
+     * amount right-aligned beneath, so no character of the label (a claim number) is cut.
+     */
+    private fun labelled(label: String, amount: String): List<String> =
+        if (label.length + 1 + amount.length <= width) listOf(spread(label, amount))
+        else wrap(label) + spread("", amount)
 
     /** " (ZWG)" when [given] is a currency other than the sale's, otherwise nothing. */
     private fun foreign(given: String, sale: String): String =

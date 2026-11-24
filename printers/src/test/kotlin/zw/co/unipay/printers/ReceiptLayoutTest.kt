@@ -285,8 +285,6 @@ class ReceiptLayoutTest {
         )
     }
 
-    // The sample label is 27 characters: with "-7.00" it cannot fit 32 columns, where spread
-    // would cut it, so the claim lines are read off a wider roll.
     private val wide = ReceiptLayout(width = 48)
 
     private val claim = ReceiptClaim("Medical aid (CIMAS · CLM-1)", 7.0)
@@ -319,14 +317,37 @@ class ReceiptLayoutTest {
 
     @Test
     fun claimAndToPayAfterTotal() {
-        val receipt = wide.render(claimed())
+        val receipt = paper.render(claimed())
 
         val total = receipt.indexOfFirst { it.startsWith("TOTAL") }
-        val claimAt = receipt.indexOfFirst { it.startsWith("Medical aid (CIMAS · CLM-1)") }
+        val claimAt = receipt.indexOfFirst { it.contains("Medical aid (CIMAS · CLM-1)") }
         assertTrue(claimAt > total)
+        assertTrue(receipt[claimAt + 1].endsWith("-7.00"))
+        assertTrue(receipt[claimAt + 2].startsWith("TO PAY"))
+        assertTrue(receipt[claimAt + 2].endsWith("3.00"))
+    }
+
+    @Test
+    fun claimThatFitsStaysOnOneLine() {
+        val receipt = wide.render(claimed())
+
+        val claimAt = receipt.indexOfFirst { it.startsWith("Medical aid (CIMAS · CLM-1)") }
         assertTrue(receipt[claimAt].endsWith("-7.00"))
         assertTrue(receipt[claimAt + 1].startsWith("TO PAY"))
-        assertTrue(receipt[claimAt + 1].endsWith("3.00"))
+    }
+
+    @Test
+    fun longClaimLabelWrapsOnNarrowRoll() {
+        val label = "Medical aid (CIMAS · CLM-123456789012345)"
+        val receipt = paper.render(
+            claimed().copy(claims = listOf(ReceiptClaim(label, 7.0)))
+        )
+
+        val total = receipt.indexOfFirst { it.startsWith("TOTAL") }
+        val amountAt = receipt.indexOfFirst { it.endsWith("-7.00") }
+        val printed = receipt.subList(total + 2, amountAt).joinToString(" ")
+        assertEquals(label, printed)
+        assertTrue(receipt.all { it.length <= 32 })
     }
 
     @Test
@@ -341,7 +362,7 @@ class ReceiptLayoutTest {
         val fiscal = FiscalSection(lines = listOf("X"), qrCode = null, replacesItems = true)
         val receipt = wide.render(claimed().copy(fiscal = fiscal))
 
-        assertTrue(receipt.any { it.startsWith("Medical aid (CIMAS · CLM-1)") })
+        assertTrue(receipt.any { it.contains("Medical aid (CIMAS · CLM-1)") })
         assertTrue(receipt.any { it.startsWith("TO PAY") })
     }
 
