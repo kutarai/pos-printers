@@ -220,10 +220,9 @@ class ReceiptLayout(private val width: Int = 32) {
 
         // Nothing tendered and no method: the medical aid covered the whole bill.
         if (content.paymentMethod.isNotBlank() || content.tendered != 0.0) {
-            out += spread(
-                tenderLabel(content.paymentMethod) + foreign(content.tenderedCurrency, content.currency),
-                money(content.tendered)
-            )
+            val label = tenderLabel(content.paymentMethod) +
+                foreign(content.tenderedCurrency, content.currency)
+            out += spread(label, money(content.tendered))
         }
         if (content.change > 0.0) {
             out += spread(

@@ -147,5 +147,7 @@ object EscPos {
         .replace('“', '"')
         .replace('”', '"')
         .replace('…', '.')
+        .replace('·', '-')
+        .replace('−', '-')
         .map { char -> if (char.code in 32..126) char.code.toByte() else '?'.code.toByte() }
 }

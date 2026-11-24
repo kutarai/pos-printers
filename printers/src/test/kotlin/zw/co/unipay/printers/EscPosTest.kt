@@ -63,4 +63,14 @@ class EscPosTest {
 
     private fun <T> List<T>.containsSubList(sub: List<T>): Boolean =
         indices.any { i -> i + sub.size <= size && subList(i, i + sub.size) == sub }
+
+    @Test
+    fun `a middle dot and a minus sign print as hyphens, not question marks`() {
+        val text = String(
+            EscPos.document(listOf("Medical aid (CIMAS · CLM-1) \u22127.00")), Charsets.US_ASCII
+        )
+
+        assertTrue(text.contains("Medical aid (CIMAS - CLM-1) -7.00"))
+        assertTrue(!text.contains("?"))
+    }
 }
